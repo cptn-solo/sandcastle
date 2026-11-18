@@ -1,6 +1,6 @@
 {
   "name": "@ai-hero/sandcastle",
-  "version": "0.14.0",
+  "version": "0.14.1-cptn.0",
   "description": "CLI for orchestrating AI agents in isolated sandbox environments",
   "type": "module",
   "main": "./dist/index.js",
@@ -70,7 +70,7 @@
     "lint:report": "tsx scripts/lint-ratchet.ts --report",
     "format": "biome format --write .",
     "format:check": "biome format .",
-    "prepare": "husky",
+    "prepare": "husky && npm run build",
     "release": "changeset publish",
     "sandcastle": "npm run build && tsx .sandcastle/run.ts",
     "test-podman": "npm run build && tsx --env-file=.sandcastle/.env .sandcastle/test-podman.ts",
