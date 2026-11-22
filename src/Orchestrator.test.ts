@@ -1810,6 +1810,82 @@ describe("Orchestrator error handling", () => {
     }
   });
 
+  it("succeeds when pi recovers from a mid-stream error and completes", async () => {
+    const hostDir = await mkdtemp(
+      join(tmpdir(), "orch-stream-error-recovered-"),
+    );
+
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    // A transient provider failure mid-run: pi reports the error in its
+    // stream, retries the call, and finishes the task normally (exit 0,
+    // successful agent_end). The recovered error must not fail the run.
+    // Observed with pi-provider-retry 0.1.2: the provider dropped a
+    // connection, the extension normalized the message, pi agent-retried
+    // and completed — the stale stream error still failed the worker.
+    const lines = [
+      JSON.stringify({
+        type: "message_update",
+        assistantMessageEvent: { type: "text_delta", delta: "working on it" },
+      }),
+      JSON.stringify({
+        type: "error",
+        message: "Connection dropped mid-generation",
+      }),
+      JSON.stringify({
+        type: "message_update",
+        assistantMessageEvent: { type: "text_delta", delta: "All done." },
+      }),
+      JSON.stringify({
+        type: "agent_end",
+        messages: [
+          {
+            role: "assistant",
+            content: [{ type: "text", text: "All done." }],
+            stopReason: "stop",
+          },
+        ],
+      }),
+    ];
+
+    const { factoryLayer } = makeTestSandboxFactory(hostDir, (dir) => {
+      const real = makeLocalSandbox(dir);
+      return {
+        exec: (command, options) => {
+          if (command.startsWith("pi ") && options?.onLine) {
+            const { onLine } = options;
+            for (const line of lines) {
+              onLine(line);
+            }
+            return Effect.succeed({
+              stdout: lines.join("\n"),
+              stderr: "",
+              exitCode: 0,
+            });
+          }
+          return real.exec(command, options);
+        },
+        copyIn: (hostPath, sandboxPath) => real.copyIn(hostPath, sandboxPath),
+        copyFileOut: (sandboxPath, hostPath) =>
+          real.copyFileOut(sandboxPath, hostPath),
+      };
+    });
+
+    const exit = await Effect.runPromiseExit(
+      orchestrate({
+        provider: piFactory("anthropic/claude-haiku-5-5", {
+          captureSessions: false,
+        }),
+        hostRepoDir: hostDir,
+        iterations: 1,
+        prompt: "do some work",
+      }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
+    );
+
+    expect(exit._tag).toBe("Success");
+  });
+
   it("uses the stream error as detail when the agent exits non-zero with empty stderr", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "orch-stream-error-nz-"));
 

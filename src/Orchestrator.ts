@@ -193,16 +193,25 @@ const invokeAgent = (
             if (parsed.type === "text") {
               onText(parsed.text);
               accumulatedOutput += parsed.text;
+              // Progress after a reported error supersedes it: pi retries
+              // transient failures in-stream (agent-level retry, e.g. after
+              // pi-provider-retry normalization) and still exits 0, so an
+              // error event is only authoritative while nothing successful
+              // has followed it.
+              streamError = undefined;
             } else if (parsed.type === "context_window") {
               onContextWindow(parsed.contextWindow);
             } else if (parsed.type === "result") {
               resultText = parsed.result;
+              streamError = undefined;
             } else if (parsed.type === "tool_call") {
               onToolCall(parsed.name, parsed.args);
+              streamError = undefined;
             } else if (parsed.type === "session_id") {
               sessionId = parsed.sessionId;
             } else if (parsed.type === "usage") {
               usage = parsed.usage;
+              streamError = undefined;
             } else if (parsed.type === "error") {
               streamError = parsed.message;
             }
@@ -247,8 +256,10 @@ const invokeAgent = (
         });
       }
 
-      // Some agents (pi, opencode) exit 0 after reporting a failure in their
-      // stream. Treat the reported error as authoritative.
+      // Some agents (pi, opencode) exit 0 after reporting a failure in
+      // their stream. Treat the reported error as authoritative — unless the
+      // stream showed progress after it (a retried call that succeeded),
+      // which cleared it above.
       if (streamError !== undefined) {
         return yield* new AgentError({
           message: `${provider.name} reported an error:\n${streamError}`,
